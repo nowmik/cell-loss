@@ -3,91 +3,90 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="Cell Error Visualizer", layout="centered")
+st.set_page_config(page_title="Cell Growth Error Analyzer", layout="wide")
 
-st.title("🔬 Cell Growth & Error Visualizer")
-st.markdown("지수 표기법(예: `1.5e5`)으로 데이터를 입력하여 실제 성장 곡선과 오차를 비교하세요.")
+st.title("🔬 Cell Growth Analysis & Error Calculator")
 
-# --- 사이드바 설정 ---
-st.sidebar.header("🧫 실험 조건 설정")
-# format="%.1e" 를 사용해 지수 표기법 입력 가능하게 설정
-n0 = st.sidebar.number_input("초기 Seeding (n0)", value=1.0e5, format="%.1e")
-doubling_time = st.sidebar.number_input("Doubling Time (hours)", value=24.0)
+# --- 1. 세포 정보 및 기본 설정 ---
+st.header("1. 기본 정보 입력")
+col_info1, col_info2, col_info3 = st.columns(3)
 
-# --- 데이터 입력 섹션 ---
-st.subheader("📊 7일간의 관측 데이터 입력")
-st.info("입력 칸에 `2e5`라고 치고 Enter를 누르면 `200,000`으로 자동 입력됩니다.")
+with col_info1:
+    cell_name = st.text_input("분석할 세포 명칭", value="HeLa")
+with col_info2:
+    doubling_time = st.number_input(f"{cell_name}의 Doubling Time (hours)", value=24.0)
+with col_info3:
+    st.write("초기 Seeding 수 ($A \\times 10^B$)")
+    c_a, c_b = st.columns(2)
+    with c_a:
+        n0_coeff = st.number_input("계수(A)", value=2.5, step=0.1, key="n0_a")
+    with c_b:
+        n0_exp = st.number_input("지수(B)", value=4, step=1, key="n0_b")
+    n0 = n0_coeff * (10 ** n0_exp)
 
-# 입력 테이블 구성
+st.divider()
+
+# --- 2. 7일간의 데이터 입력 ---
+st.header(f"2. {cell_name} 관측 데이터 입력 ($Value \\times 10^{{Power}}$)")
+
+# 입력 편의를 위한 데이터프레임 구성
 days = [f"Day {i}" for i in range(1, 8)]
-default_values = [0.0] * 7
-df_input = pd.DataFrame({"Day": days, "Observed_Count": default_values})
+input_data = {
+    "Day": days,
+    "Value (계수)": [0.0] * 7,
+    "Power (지수)": [int(n0_exp)] * 7 # 기본적으로 초기 seeding 지수와 맞춰둠
+}
+df_input = pd.DataFrame(input_data)
 
-# 데이터 에디터 (지수 표기 적용)
-edited_df = st.data_editor(
-    df_input, 
-    column_config={
-        "Observed_Count": st.column_config.NumberColumn(
-            "실제 관측 세포 수",
-            format="%.2e"  # 화면에 지수 형태로 표시
-        )
-    },
-    use_container_width=True,
-    num_rows="fixed"
-)
+# 데이터 에디터
+edited_df = st.data_editor(df_input, use_container_width=True, num_rows="fixed")
 
-if st.button("성장 곡선 비교 및 오차 분석 실행"):
-    # 1. 계산 로직
+if st.button(f"{cell_name} 데이터 분석 시작"):
+    # 실제 값 계산
+    observed_counts = edited_df["Value (계수)"].values * (10 ** edited_df["Power (지수)"].values)
+    
+    # 이론적 수치 계산
     day_indices = np.arange(1, 8)
-    time_hours = day_indices * 24
-    theoretical_counts = n0 * (2 ** (time_hours / doubling_time))
-    observed_counts = edited_df["Observed_Count"].values
-
-    # 오차 계산 (실제 데이터가 입력된 경우만)
+    theoretical_counts = n0 * (2 ** ((day_indices * 24) / doubling_time))
+    
+    # 오차 계산
     valid_mask = observed_counts > 0
     if not any(valid_mask):
-        st.warning("데이터를 입력해주세요!")
+        st.error("입력된 데이터가 없습니다. 값을 입력해주세요.")
     else:
         errors = np.abs(theoretical_counts[valid_mask] - observed_counts[valid_mask]) / theoretical_counts[valid_mask] * 100
         avg_error = np.mean(errors)
         
-        # 2. 그래프 시각화 (Plotly)
+        # --- 3. 그래프 시각화 ---
         fig = go.Figure()
         
         # 이론적 성장 곡선
         fig.add_trace(go.Scatter(
-            x=days, y=theoretical_counts, 
-            mode='lines', name='이론적 성장 (Ideal)',
-            line=dict(color='#2ecc71', width=3, dash='dash')
+            x=days, y=theoretical_counts, name='Theoretical Growth',
+            line=dict(color='gray', dash='dash'), opacity=0.5
         ))
         
-        # 실제 관측 데이터
+        # 실제 관측 곡선
         fig.add_trace(go.Scatter(
-            x=days, y=observed_counts, 
-            mode='lines+markers', name='실제 관측 (Observed)',
-            marker=dict(size=10, color='#e74c3c'),
-            line=dict(color='#e74c3c', width=3)
+            x=days, y=observed_counts, name=f'Observed ({cell_name})',
+            mode='lines+markers', line=dict(color='#1f77b4', width=3),
+            marker=dict(size=10)
         ))
 
         fig.update_layout(
-            title="Cell Growth Curve: Ideal vs Observed",
-            xaxis_title="Time (Days)",
-            yaxis_title="Cell Number (log scale)",
-            yaxis_type="log", # 세포 수는 기하급수적으로 늘어나므로 log scale이 보기 편함
-            template="plotly_white",
-            hovermode="x unified"
+            title=f"{cell_name} Growth Curve Analysis",
+            xaxis_title="Timeline",
+            yaxis_title="Cell Number (Log Scale)",
+            yaxis_type="log",
+            template="plotly_white"
         )
-
         st.plotly_chart(fig, use_container_width=True)
 
-        # 3. 분석 결과 리포트
-        st.success(f"### 📈 분석 결과")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.metric("평균 손실/오차율", f"{avg_error:.2f}%")
-        with c2:
-            safety_factor = 1 + (avg_error/100)
-            st.metric("추천 Seeding 보정 계수", f"{safety_factor:.2f}x")
+        # --- 4. 결과 리포트 ---
+        st.success(f"### 📋 {cell_name} 실험 숙련도 리포트")
+        res1, res2, res3 = st.columns(3)
+        res1.metric("평균 오차율", f"{avg_error:.2f}%")
+        res2.metric("보정 계수", f"{(1 + avg_error/100):.22f}x")
+        res3.metric("최종 권장 Seeding", f"{(n0 * (1 + avg_error/100)):.2e}")
         
-        st.write(f"👉 다음 실험 시 목표량보다 **{avg_error:.1f}%** 더 깔아야 목표 Confluency에 도달할 수 있습니다.")
-
+        st.info(f"💡 {cell_name} 실험 시, 평소 본인의 숙련도를 고려하여 목표 수치보다 약 **{avg_error:.1f}%** 더 분주하는 것을 권장합니다.")
